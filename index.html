@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Customizable Christmas Tree</title>
     <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
+    <!-- 引入 gif.js 用于生成 GIF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
     <style>
         body {
             margin: 0;
@@ -50,6 +52,35 @@
         .toggle-btn:hover {
             background: rgba(50, 50, 50, 0.9);
         }
+
+        /* 音乐按钮 */
+        .music-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            background: rgba(30, 30, 30, 0.6);
+            backdrop-filter: blur(5px);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 101;
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            font-size: 20px;
+            transition: transform 0.3s;
+            animation: spin 4s linear infinite;
+            animation-play-state: paused; /* 默认不转 */
+        }
+        
+        .music-btn:hover {
+            background: rgba(50, 50, 50, 0.9);
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
 
         /* 控制面板 */
         .controls {
@@ -104,6 +135,21 @@
             background: rgba(0,0,0,0.3);
             border: 1px solid #555;
             border-radius: 4px;
+            color: white;
+        }
+        
+        select {
+            width: 100%;
+            padding: 8px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+        }
+        
+        select option {
+            background: #333;
             color: white;
         }
 
@@ -161,14 +207,71 @@
             z-index: 10;
             text-shadow: 0 0 10px rgba(0,0,0,0.8);
         }
+
+        /* 加载/录制遮罩层 */
+        #loadingOverlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        #loadingOverlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .progress-container {
+            width: 300px;
+            height: 10px;
+            background: #333;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #d4af37, #f0e68c);
+            transition: width 0.1s;
+        }
+        .loading-text {
+            font-size: 1.2rem;
+            color: #d4af37;
+            font-family: sans-serif;
+        }
     </style>
 </head>
 <body>
+
+    <!-- 录制遮罩层 -->
+    <div id="loadingOverlay">
+        <div class="loading-text" id="loadingText">正在准备录制...</div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+    </div>
 
     <!-- 切换按钮 -->
     <div class="toggle-btn" onclick="toggleControls()" title="设置">
         ⚙️
     </div>
+
+    <!-- 音乐按钮 -->
+    <div class="music-btn" onclick="toggleMusic()" id="musicBtn" title="播放/暂停音乐">
+        🔇
+    </div>
+
+    <!-- 背景音乐 (Jingle Bells) -->
+    <audio id="bgm" loop>
+        <source src="https://ia800302.us.archive.org/16/items/JingleBells_651/JingleBells.mp3" type="audio/mp3">
+        Your browser does not support the audio element.
+    </audio>
 
     <!-- 控制面板 (默认隐藏) -->
     <div class="controls" id="controlsPanel">
@@ -181,6 +284,14 @@
             </div>
             <button onclick="generateFromSeed()" style="margin-top: 10px;">生成专属圣诞树</button>
             <button onclick="randomSeed()" style="margin-top: 5px; background: #444; color: white;">🎲 随机一个数字</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 导出按钮区域 -->
+        <div class="control-group">
+            <button onclick="exportGIF()" style="background: linear-gradient(135deg, #ff6b6b, #ee5253); color: white;">🎥 导出 GIF 动图</button>
+            <div style="font-size: 0.8rem; color: #888; margin-top: 5px; text-align: center;">(录制约 4 秒，请耐心等待)</div>
         </div>
 
         <div class="divider"></div>
@@ -209,14 +320,21 @@
             <input type="color" id="col_star" oninput="updateParam('star_col', this.value)">
         </div>
 
+        <!-- 丝带控制区 -->
         <div class="control-group">
-            <label>丝带颜色 (Ribbon)</label>
-            <div class="input-row">
+            <label>丝带 (Ribbon)</label>
+            <div class="input-row" style="margin-bottom: 5px;">
                 <input type="color" id="col_ribbon" oninput="updateParam('ribbon_col', this.value)">
-                <label style="margin:0; display:flex; align-items:center;">
+                <label style="margin:0; display:flex; align-items:center; white-space:nowrap;">
                     <input type="checkbox" id="has_ribbon" checked onchange="updateParam('ribbon', this.checked)" style="margin-right:5px;"> 显示
                 </label>
             </div>
+            <!-- 丝带形状选择 -->
+            <select id="ribbon_shape" onchange="updateParam('ribbon_shape', this.value)">
+                <option value="spiral">经典螺旋 (Spiral)</option>
+                <option value="double">双重螺旋 (Double)</option>
+                <option value="cross">交叉缠绕 (Cross)</option>
+            </select>
         </div>
         
         <div class="control-group">
@@ -233,6 +351,154 @@
 function toggleControls() {
     const panel = document.getElementById('controlsPanel');
     panel.classList.toggle('active');
+}
+
+// --- 音乐控制 ---
+function toggleMusic() {
+    const audio = document.getElementById('bgm');
+    const btn = document.getElementById('musicBtn');
+    
+    if (audio.paused) {
+        audio.volume = 0.5;
+        audio.play().then(() => {
+            btn.innerText = "🎵";
+            btn.style.animationPlayState = "running";
+        }).catch(e => {
+            console.log("播放失败(可能需要用户交互):", e);
+        });
+    } else {
+        audio.pause();
+        btn.innerText = "🔇";
+        btn.style.animationPlayState = "paused";
+    }
+}
+
+// --- GIF 导出逻辑 ---
+let isRecording = false;
+
+function exportGIF() {
+    if (isRecording) return;
+    isRecording = true;
+    
+    // 显示加载层
+    const overlay = document.getElementById('loadingOverlay');
+    const progressText = document.getElementById('loadingText');
+    const progressBar = document.getElementById('progressBar');
+    overlay.classList.add('visible');
+    progressText.innerText = "正在录制画面 (0%)...";
+    progressBar.style.width = "0%";
+
+    // 获取 Worker 代码 (为了解决跨域问题)
+    const workerUrl = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
+    
+    fetch(workerUrl)
+        .then(response => response.text())
+        .then(workerCode => {
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            startGIFRecording(blobUrl);
+        })
+        .catch(err => {
+            alert("加载 GIF 组件失败，请检查网络");
+            overlay.classList.remove('visible');
+            isRecording = false;
+        });
+}
+
+function startGIFRecording(workerScriptUrl) {
+    const overlay = document.getElementById('loadingOverlay');
+    const progressText = document.getElementById('loadingText');
+    const progressBar = document.getElementById('progressBar');
+
+    // 临时调整画布大小 (GIF不宜过大，限制宽度为500)
+    const originalWidth = scene.canvas.width;
+    const originalHeight = scene.canvas.height;
+    const originalScale = scene.scale;
+    
+    const targetWidth = 500;
+    const targetHeight = Math.floor(originalHeight * (targetWidth / originalWidth));
+    
+    scene.canvas.width = targetWidth;
+    scene.canvas.height = targetHeight;
+    // 重新计算缩放
+    const isPortrait = targetHeight > targetWidth;
+    const baseScale = isPortrait ? 0.75 : 0.55;
+    scene.scale = Math.min(targetWidth, targetHeight) * baseScale;
+    
+    scene.width = targetWidth;
+    scene.height = targetHeight;
+
+    const gif = new GIF({
+        workers: 2,
+        quality: 10,
+        workerScript: workerScriptUrl,
+        width: targetWidth,
+        height: targetHeight,
+        background: scene.cfg.bg_col
+    });
+
+    const duration = 4000; // 录制4秒
+    const fps = 30;
+    const totalFrames = (duration / 1000) * fps;
+    const dt = 1000 / fps;
+    
+    cancelAnimationFrame(animationFrameId);
+    
+    let currentFrame = 0;
+    let simulatedTime = performance.now();
+
+    function captureFrame() {
+        const percent = Math.round((currentFrame / totalFrames) * 50);
+        progressText.innerText = `正在录制画面 (${percent}%)...`;
+        progressBar.style.width = `${percent}%`;
+
+        scene.draw(simulatedTime);
+        
+        gif.addFrame(scene.canvas, {copy: true, delay: dt});
+        
+        simulatedTime += dt;
+        currentFrame++;
+
+        if (currentFrame < totalFrames) {
+            setTimeout(captureFrame, 0);
+        } else {
+            progressText.innerText = "正在渲染 GIF (这可能需要几秒钟)...";
+            gif.render();
+        }
+    }
+
+    gif.on('progress', function(p) {
+        const percent = 50 + Math.round(p * 50);
+        progressText.innerText = `正在渲染 GIF (${percent}%)...`;
+        progressBar.style.width = `${percent}%`;
+    });
+
+    gif.on('finished', function(blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Christmas_Tree_${document.getElementById('seedInput').value}.gif`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        restoreScene();
+    });
+
+    setTimeout(captureFrame, 100);
+
+    function restoreScene() {
+        scene.canvas.width = originalWidth;
+        scene.canvas.height = originalHeight;
+        scene.scale = originalScale;
+        scene.width = originalWidth;
+        scene.height = originalHeight;
+        
+        overlay.classList.remove('visible');
+        isRecording = false;
+        
+        animate(performance.now());
+    }
 }
 
 // --- 1. 种子随机数生成器 ---
@@ -287,7 +553,8 @@ class ChristmasTreeScene {
             snow_col: "#ffffff",
             ribbon: true,
             ribbon_col: "#D4AF37",
-            ribbon_width: 2.5
+            ribbon_width: 2.5,
+            ribbon_shape: "spiral" // 默认形状
         };
 
         this.points = [];
@@ -307,11 +574,7 @@ class ChristmasTreeScene {
         this.canvas.height = this.height;
         
         // --- 尺寸优化逻辑 ---
-        // 判断屏幕方向
         const isPortrait = this.height > this.width;
-        
-        // 缩放系数调整：竖屏下给更大比例 (0.75)，横屏下保持适中 (0.55)
-        // 这样可以让树在手机上看起来更大、更气派
         const baseScale = isPortrait ? 0.75 : 0.55;
         this.scale = Math.min(this.width, this.height) * baseScale; 
     }
@@ -408,32 +671,48 @@ class ChristmasTreeScene {
             });
         }
 
-        // 4. 丝带
+        // 4. 丝带 (多形状支持)
         if (this.cfg.ribbon) {
             const n_rib = 2500;
-            for(let i=0; i<n_rib; i++) {
-                let h = i / n_rib * 0.95;
-                let base_r = (1 - h) * 0.65 * 1.05;
-                let theta = 12 * Math.PI * h;
-                this.points.push({
-                    x: base_r * Math.cos(theta),
-                    y: h - 0.5,
-                    z: base_r * Math.sin(theta),
-                    col: this.cfg.ribbon_col,
-                    size: this.cfg.ribbon_width * 1.5,
-                    type: 'ribbon',
-                    alpha: 1
-                });
+            const shape = this.cfg.ribbon_shape || 'spiral';
+
+            // 辅助函数：添加一条丝带线
+            const addRibbonLine = (offsetAngle, direction = 1) => {
+                for(let i=0; i<n_rib; i++) {
+                    let h = i / n_rib * 0.95;
+                    // 稍微调整半径，让丝带在树表面浮起
+                    let base_r = (1 - h) * 0.65 * 1.05;
+                    // 计算螺旋角度
+                    let theta = (12 * Math.PI * h * direction) + offsetAngle;
+                    
+                    this.points.push({
+                        x: base_r * Math.cos(theta),
+                        y: h - 0.5,
+                        z: base_r * Math.sin(theta),
+                        col: this.cfg.ribbon_col,
+                        size: this.cfg.ribbon_width * 1.5,
+                        type: 'ribbon',
+                        alpha: 1
+                    });
+                }
+            };
+
+            if (shape === 'spiral') {
+                addRibbonLine(0);
+            } else if (shape === 'double') {
+                addRibbonLine(0);
+                addRibbonLine(Math.PI); // 第二条相隔180度
+            } else if (shape === 'cross') {
+                addRibbonLine(0, 1);  // 正向螺旋
+                addRibbonLine(0, -1); // 反向螺旋
             }
         }
 
-        // 5. 雪花 (满屏优化)
+        // 5. 雪花
         if (this.snow.length === 0) { 
-            const n_snow = 400; // 增加雪花数量
+            const n_snow = 400; 
             for(let i=0; i<n_snow; i++) {
                 this.snow.push({
-                    // 扩大生成范围：从 (-1,1) 扩大到 (-3,3)
-                    // 这样即使树放大了，雪花也能覆盖到屏幕边缘
                     x: Math.random() * 6 - 3, 
                     y: Math.random() * 2.5 - 1.0,
                     z: Math.random() * 6 - 3,
@@ -463,9 +742,8 @@ class ChristmasTreeScene {
             let depth = 1 / (2.5 - z_rot);
             let x_proj = x_rot * depth * this.scale + this.width / 2;
             
-            // 调整中心点 Y 轴位置：放大后需要稍微下移一点点以居中
             let y_center_offset = this.height * 0.55; 
-            if (this.height > this.width) y_center_offset = this.height * 0.6; // 手机上稍微偏下
+            if (this.height > this.width) y_center_offset = this.height * 0.6; 
 
             let y_proj = -p.y * depth * this.scale + y_center_offset;
 
@@ -480,7 +758,7 @@ class ChristmasTreeScene {
 
         for (let s of this.snow) {
             s.y -= s.speed;
-            if (s.y < -1.0) s.y = 1.5; // 循环范围扩大
+            if (s.y < -1.0) s.y = 1.5; 
 
             let depth = 1 / (2.5 - s.z);
             let x_proj = s.x * depth * this.scale + this.width / 2;
@@ -513,7 +791,6 @@ class ChristmasTreeScene {
 
     drawStar(time) {
         const cx = this.width / 2;
-        // 动态计算星星位置，跟随树顶
         let y_center_offset = this.height * 0.55; 
         if (this.height > this.width) y_center_offset = this.height * 0.6;
         
@@ -546,11 +823,13 @@ const scene = new ChristmasTreeScene('tree-container');
 
 syncInputs(scene.cfg);
 
+let animationFrameId;
+
 function animate(time) {
     scene.draw(time);
-    requestAnimationFrame(animate);
+    animationFrameId = requestAnimationFrame(animate);
 }
-requestAnimationFrame(animate);
+animationFrameId = requestAnimationFrame(animate);
 
 
 // --- 生成逻辑 ---
@@ -565,20 +844,60 @@ function generateFromSeed() {
     const seedVal = parseInt(document.getElementById('seedInput').value) || 2026;
     const rng = new SeededRandom(seedVal);
 
-    const bg = rng.randomColor([200, 280], [10, 50], [2, 15]); 
-
-    let treeH = rng.range(80, 160); 
-    if (rng.next() > 0.8) treeH = rng.range(0, 360); 
-    const tree1 = rng.hslToHex(treeH, rng.range(40, 80), rng.range(20, 40));
-    const tree2 = rng.hslToHex(treeH, rng.range(40, 80), rng.range(30, 50));
-
-    const decor1 = rng.randomColor([0, 360], [70, 100], [50, 80]);
-    const decor2 = rng.randomColor([0, 360], [70, 100], [50, 80]);
-
-    const isGold = rng.next() > 0.3;
-    const goldSilver = isGold ? "#FFD700" : "#E0E0E0";
+    // 随机主题逻辑：大幅扩展配色可能性
+    const themeRoll = rng.next();
     
+    let bg, tree1, tree2, decor1, decor2, goldSilver;
+
+    if (themeRoll < 0.3) {
+        // 1. 经典风格 (30%)
+        bg = rng.randomColor([200, 260], [10, 30], [2, 10]); // 深蓝黑
+        const treeH = rng.range(80, 160); // 绿色
+        tree1 = rng.hslToHex(treeH, rng.range(40, 80), rng.range(20, 35));
+        tree2 = rng.hslToHex(treeH, rng.range(40, 80), rng.range(30, 45));
+        decor1 = "#FF0000"; // 红
+        decor2 = "#FFD700"; // 金
+        goldSilver = "#FFD700";
+    } else if (themeRoll < 0.5) {
+        // 2. 冰雪风格 (20%)
+        bg = rng.randomColor([190, 220], [20, 40], [10, 20]); // 浅蓝灰
+        tree1 = rng.hslToHex(180, 20, 90); // 接近白
+        tree2 = rng.hslToHex(200, 30, 80); // 浅蓝白
+        decor1 = "#00BFFF"; // 深天蓝
+        decor2 = "#E0FFFF"; // 淡青
+        goldSilver = "#B0C4DE"; // 银
+    } else if (themeRoll < 0.7) {
+        // 3. 梦幻少女 (20%)
+        bg = "#1a0510"; // 深粉黑
+        tree1 = rng.hslToHex(330, 80, 60); // 粉红
+        tree2 = rng.hslToHex(340, 90, 70); // 亮粉
+        decor1 = "#FFFFFF";
+        decor2 = "#FFFACD";
+        goldSilver = "#FFD700";
+    } else if (themeRoll < 0.85) {
+        // 4. 暗夜霓虹 (15%)
+        bg = "#000000";
+        const neonH = rng.range(0, 360);
+        tree1 = rng.hslToHex(neonH, 100, 50); // 纯霓虹色
+        tree2 = rng.hslToHex((neonH+30)%360, 100, 40);
+        decor1 = "#FFFFFF";
+        decor2 = "#000000";
+        goldSilver = "#FFFFFF";
+    } else {
+        // 5. 纯金奢华 (15%)
+        bg = "#0a0a00";
+        tree1 = "#DAA520";
+        tree2 = "#B8860B";
+        decor1 = "#FF4500";
+        decor2 = "#FFFFFF";
+        goldSilver = "#FFD700";
+    }
+
     const textCol = goldSilver;
+    
+    // 随机丝带形状
+    const shapes = ['spiral', 'double', 'cross'];
+    const ribbonShape = rng.choice(shapes);
 
     const newCfg = {
         bg_col: bg,
@@ -586,7 +905,8 @@ function generateFromSeed() {
         decor_cols: [decor1, decor2],
         star_col: goldSilver,
         ribbon_col: goldSilver,
-        ribbon: rng.next() > 0.2, 
+        ribbon: rng.next() > 0.1, // 90%概率有丝带
+        ribbon_shape: ribbonShape,
         text_col: textCol,
         snow_col: "#ffffff"
     };
@@ -604,10 +924,11 @@ function syncInputs(cfg) {
     document.getElementById('col_ribbon').value = cfg.ribbon_col;
     document.getElementById('col_text').value = cfg.text_col;
     document.getElementById('has_ribbon').checked = cfg.ribbon;
+    document.getElementById('ribbon_shape').value = cfg.ribbon_shape || 'spiral';
 }
 
 function updateParam(key, value) {
-    if (key === 'ribbon') {
+    if (key === 'ribbon' || key === 'ribbon_shape') {
         scene.updateConfig({ [key]: value });
     } else {
         scene.updateColorsOnly(key, value);
