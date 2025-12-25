@@ -15,6 +15,8 @@
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             overflow: hidden;
             color: white;
+            /* 禁止移动端默认的触摸行为(如滚动)，保证互动流畅 */
+            touch-action: none; 
         }
 
         /* 全屏容器 */
@@ -22,6 +24,7 @@
             width: 100vw;
             height: 100vh;
             position: relative;
+            cursor: crosshair; /* 鼠标变成十字准星，暗示可互动 */
         }
 
         canvas {
@@ -412,20 +415,17 @@ function startGIFRecording(workerScriptUrl) {
     const progressBar = document.getElementById('progressBar');
 
     // 1. 确定导出尺寸 
-    // 关键优化：不再改变主画布大小，而是创建一个保持当前屏幕比例的 Offscreen Canvas
-    // 限制最大宽度为 600px 以保证文件体积和渲染速度，但完美保持构图比例
     const MAX_WIDTH = 600; 
     const currentRatio = scene.canvas.width / scene.canvas.height;
     
     let targetWidth = scene.canvas.width;
     let targetHeight = scene.canvas.height;
 
-    // 如果屏幕很宽（电脑），缩放到 600px 宽
+    // 缩放逻辑
     if (targetWidth > MAX_WIDTH) {
         targetWidth = MAX_WIDTH;
         targetHeight = Math.floor(targetWidth / currentRatio);
     }
-    // 如果屏幕是竖屏且很大（手机高分屏），也进行适度缩放
     if (targetHeight > 800 && targetWidth < MAX_WIDTH) {
         const scale = 800 / targetHeight;
         targetHeight = 800;
@@ -439,16 +439,16 @@ function startGIFRecording(workerScriptUrl) {
     const gifCtx = gifCanvas.getContext('2d');
 
     const gif = new GIF({
-        workers: 4, // 增加线程数
-        quality: 10, // 质量
+        workers: 4, 
+        quality: 10,
         workerScript: workerScriptUrl,
         width: targetWidth,
         height: targetHeight,
         background: scene.cfg.bg_col
     });
 
-    const duration = 4000; // 录制4秒
-    const fps = 20; // 20FPS 对 GIF 足够且文件小
+    const duration = 4000; 
+    const fps = 20; 
     const totalFrames = (duration / 1000) * fps;
     const dt = 1000 / fps;
     
@@ -466,8 +466,7 @@ function startGIFRecording(workerScriptUrl) {
         scene.draw(simulatedTime);
         
         // 2. 将主画布的内容 等比缩放 绘制到 GIF 画布上
-        // 这一步利用 drawImage 的缩放能力，实现完美的抗锯齿缩小
-        gifCtx.fillStyle = scene.cfg.bg_col; // 填充背景防透
+        gifCtx.fillStyle = scene.cfg.bg_col; 
         gifCtx.fillRect(0, 0, targetWidth, targetHeight);
         gifCtx.drawImage(scene.canvas, 0, 0, targetWidth, targetHeight);
         
@@ -478,7 +477,7 @@ function startGIFRecording(workerScriptUrl) {
         currentFrame++;
 
         if (currentFrame < totalFrames) {
-            setTimeout(captureFrame, 0); // 避免阻塞 UI
+            setTimeout(captureFrame, 0); 
         } else {
             progressText.innerText = "正在渲染 GIF (这可能需要几秒钟)...";
             gif.render();
@@ -567,12 +566,58 @@ class ChristmasTreeScene {
 
         this.points = [];
         this.snow = [];
+        this.sparkles = []; // 存储魔法粒子
+        this.mouse = { x: -1000, y: -1000, active: false };
         
         this.resize();
         window.addEventListener('resize', () => this.resize());
+        this.bindEvents();
         
         // 初始化生成一棵树
         this.generateData(); 
+    }
+
+    // 绑定交互事件
+    bindEvents() {
+        const onMove = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            // 处理触摸或鼠标坐标
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            this.mouse.x = clientX - rect.left;
+            this.mouse.y = clientY - rect.top;
+            this.mouse.active = true;
+            
+            // 移动时生成粒子
+            this.addSparkles(3);
+        };
+        
+        const onLeave = () => { this.mouse.active = false; };
+
+        // 监听鼠标
+        this.canvas.addEventListener('mousemove', onMove);
+        this.canvas.addEventListener('mouseleave', onLeave);
+        // 监听触摸 (被动模式以提高性能)
+        this.canvas.addEventListener('touchstart', onMove, {passive: true});
+        this.canvas.addEventListener('touchmove', onMove, {passive: true});
+        this.canvas.addEventListener('touchend', onLeave);
+    }
+
+    // 生成魔法粒子
+    addSparkles(count) {
+        for(let i=0; i<count; i++) {
+            this.sparkles.push({
+                x: this.mouse.x,
+                y: this.mouse.y,
+                vx: (Math.random() - 0.5) * 4,
+                vy: (Math.random() - 0.5) * 4,
+                life: 1.0,
+                decay: Math.random() * 0.03 + 0.015,
+                size: Math.random() * 3 + 1,
+                col: this.cfg.star_col // 使用星星的颜色作为粒子色
+            });
+        }
     }
 
     resize() {
@@ -765,18 +810,19 @@ class ChristmasTreeScene {
         const sinA = Math.sin(angle);
         const cosA = Math.cos(angle);
 
+        // 计算中心垂直偏移
+        let y_center_offset = this.height * 0.55; 
+        if (this.height > this.width) y_center_offset = this.height * 0.6; 
+
         let renderList = [];
 
+        // 处理树木点
         for (let p of this.points) {
             let x_rot = p.x * cosA - p.z * sinA;
             let z_rot = p.z * cosA + p.x * sinA;
             
             let depth = 1 / (2.5 - z_rot);
             let x_proj = x_rot * depth * this.scale + this.width / 2;
-            
-            let y_center_offset = this.height * 0.55; 
-            if (this.height > this.width) y_center_offset = this.height * 0.6; 
-
             let y_proj = -p.y * depth * this.scale + y_center_offset;
 
             renderList.push({
@@ -788,16 +834,29 @@ class ChristmasTreeScene {
             });
         }
 
+        // 处理雪花 (含互动逻辑)
         for (let s of this.snow) {
             s.y -= s.speed;
             if (s.y < -1.0) s.y = 1.5; 
 
             let depth = 1 / (2.5 - s.z);
             let x_proj = s.x * depth * this.scale + this.width / 2;
-            let y_center_offset = this.height * 0.55; 
-            if (this.height > this.width) y_center_offset = this.height * 0.6;
-            
             let y_proj = -s.y * depth * this.scale + y_center_offset;
+
+            // --- 互动：雪花避让鼠标 ---
+            if (this.mouse.active) {
+                const dx = x_proj - this.mouse.x;
+                const dy = y_proj - this.mouse.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const repelRadius = 100; // 斥力半径
+                
+                if (dist < repelRadius) {
+                    const force = (repelRadius - dist) / repelRadius;
+                    // 反推回 3D 坐标偏移 (近似)
+                    s.x += (dx / dist) * force * 0.05;
+                    s.y -= (dy / dist) * force * 0.05; // 3D中Y轴向上
+                }
+            }
 
             renderList.push({
                 x: x_proj, y: y_proj, z: s.z,
@@ -819,6 +878,30 @@ class ChristmasTreeScene {
         }
 
         this.drawStar(time);
+        
+        // 绘制魔法粒子 (最上层)
+        this.drawSparkles();
+    }
+
+    drawSparkles() {
+        for (let i = this.sparkles.length - 1; i >= 0; i--) {
+            let p = this.sparkles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= p.decay;
+            
+            if (p.life <= 0) {
+                this.sparkles.splice(i, 1);
+                continue;
+            }
+            
+            this.ctx.globalAlpha = p.life;
+            this.ctx.fillStyle = p.col;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+        this.ctx.globalAlpha = 1.0;
     }
 
     drawStar(time) {
