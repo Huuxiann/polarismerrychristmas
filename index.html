@@ -291,7 +291,7 @@
         <!-- 导出按钮区域 -->
         <div class="control-group">
             <button onclick="exportGIF()" style="background: linear-gradient(135deg, #ff6b6b, #ee5253); color: white;">🎥 导出 GIF 动图</button>
-            <div style="font-size: 0.8rem; color: #888; margin-top: 5px; text-align: center;">(录制约 4 秒，请耐心等待)</div>
+            <div style="font-size: 0.8rem; color: #888; margin-top: 5px; text-align: center;">(录制约 4 秒，所见即所得)</div>
         </div>
 
         <div class="divider"></div>
@@ -373,7 +373,7 @@ function toggleMusic() {
     }
 }
 
-// --- GIF 导出逻辑 ---
+// --- GIF 导出逻辑 (优化版：所见即所得) ---
 let isRecording = false;
 
 function exportGIF() {
@@ -385,10 +385,10 @@ function exportGIF() {
     const progressText = document.getElementById('loadingText');
     const progressBar = document.getElementById('progressBar');
     overlay.classList.add('visible');
-    progressText.innerText = "正在录制画面 (0%)...";
+    progressText.innerText = "正在初始化录制...";
     progressBar.style.width = "0%";
 
-    // 获取 Worker 代码 (为了解决跨域问题)
+    // 获取 Worker 代码
     const workerUrl = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
     
     fetch(workerUrl)
@@ -410,27 +410,36 @@ function startGIFRecording(workerScriptUrl) {
     const progressText = document.getElementById('loadingText');
     const progressBar = document.getElementById('progressBar');
 
-    // 临时调整画布大小 (GIF不宜过大，限制宽度为500)
-    const originalWidth = scene.canvas.width;
-    const originalHeight = scene.canvas.height;
-    const originalScale = scene.scale;
+    // 1. 确定导出尺寸 
+    // 关键优化：不再改变主画布大小，而是创建一个保持当前屏幕比例的 Offscreen Canvas
+    // 限制最大宽度为 600px 以保证文件体积和渲染速度，但完美保持构图比例
+    const MAX_WIDTH = 600; 
+    const currentRatio = scene.canvas.width / scene.canvas.height;
     
-    const targetWidth = 500;
-    const targetHeight = Math.floor(originalHeight * (targetWidth / originalWidth));
-    
-    scene.canvas.width = targetWidth;
-    scene.canvas.height = targetHeight;
-    // 重新计算缩放
-    const isPortrait = targetHeight > targetWidth;
-    const baseScale = isPortrait ? 0.75 : 0.55;
-    scene.scale = Math.min(targetWidth, targetHeight) * baseScale;
-    
-    scene.width = targetWidth;
-    scene.height = targetHeight;
+    let targetWidth = scene.canvas.width;
+    let targetHeight = scene.canvas.height;
+
+    // 如果屏幕很宽（电脑），缩放到 600px 宽
+    if (targetWidth > MAX_WIDTH) {
+        targetWidth = MAX_WIDTH;
+        targetHeight = Math.floor(targetWidth / currentRatio);
+    }
+    // 如果屏幕是竖屏且很大（手机高分屏），也进行适度缩放
+    if (targetHeight > 800 && targetWidth < MAX_WIDTH) {
+        const scale = 800 / targetHeight;
+        targetHeight = 800;
+        targetWidth = Math.floor(targetWidth * scale);
+    }
+
+    // 创建一个隐藏的画布用于绘制 GIF 帧
+    const gifCanvas = document.createElement('canvas');
+    gifCanvas.width = targetWidth;
+    gifCanvas.height = targetHeight;
+    const gifCtx = gifCanvas.getContext('2d');
 
     const gif = new GIF({
-        workers: 2,
-        quality: 10,
+        workers: 4, // 增加线程数
+        quality: 10, // 质量
         workerScript: workerScriptUrl,
         width: targetWidth,
         height: targetHeight,
@@ -438,7 +447,7 @@ function startGIFRecording(workerScriptUrl) {
     });
 
     const duration = 4000; // 录制4秒
-    const fps = 30;
+    const fps = 20; // 20FPS 对 GIF 足够且文件小
     const totalFrames = (duration / 1000) * fps;
     const dt = 1000 / fps;
     
@@ -452,15 +461,23 @@ function startGIFRecording(workerScriptUrl) {
         progressText.innerText = `正在录制画面 (${percent}%)...`;
         progressBar.style.width = `${percent}%`;
 
+        // 1. 在主画布上渲染当前帧 (保持全分辨率，确保用户看到的是正常的)
         scene.draw(simulatedTime);
         
-        gif.addFrame(scene.canvas, {copy: true, delay: dt});
+        // 2. 将主画布的内容 等比缩放 绘制到 GIF 画布上
+        // 这一步利用 drawImage 的缩放能力，实现完美的抗锯齿缩小
+        gifCtx.fillStyle = scene.cfg.bg_col; // 填充背景防透
+        gifCtx.fillRect(0, 0, targetWidth, targetHeight);
+        gifCtx.drawImage(scene.canvas, 0, 0, targetWidth, targetHeight);
+        
+        // 3. 添加到 GIF
+        gif.addFrame(gifCtx, {copy: true, delay: dt});
         
         simulatedTime += dt;
         currentFrame++;
 
         if (currentFrame < totalFrames) {
-            setTimeout(captureFrame, 0);
+            setTimeout(captureFrame, 0); // 避免阻塞 UI
         } else {
             progressText.innerText = "正在渲染 GIF (这可能需要几秒钟)...";
             gif.render();
@@ -482,23 +499,13 @@ function startGIFRecording(workerScriptUrl) {
         a.click();
         document.body.removeChild(a);
         
-        restoreScene();
+        // 恢复正常动画循环
+        overlay.classList.remove('visible');
+        isRecording = false;
+        animate(performance.now());
     });
 
     setTimeout(captureFrame, 100);
-
-    function restoreScene() {
-        scene.canvas.width = originalWidth;
-        scene.canvas.height = originalHeight;
-        scene.scale = originalScale;
-        scene.width = originalWidth;
-        scene.height = originalHeight;
-        
-        overlay.classList.remove('visible');
-        isRecording = false;
-        
-        animate(performance.now());
-    }
 }
 
 // --- 1. 种子随机数生成器 ---
